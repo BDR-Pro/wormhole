@@ -266,6 +266,31 @@ These are **not** vulnerabilities at Critical tier; recorded for completeness.
 
 ---
 
+## Cross-repo hunt: NTT + UTXO/XRPL emitters (highest Critical-tier EV)
+
+Because the guardian node signs *whatever the emitter authorizes*, the direct-theft surface is the
+emitter/manager contracts, not the node. Pursued both:
+
+**(a) NTT — `wormhole-foundation/native-token-transfers` @ `250d810` — EVM manager inbound path: SOUND.**
+- `attestationReceived` is `onlyTransceiver` + `_verifyPeer`; attestations are counted from a per-transceiver
+  **bitmap** AND-ed with the enabled set (`countSetBits`), so one transceiver can't inflate the threshold.
+- The public `executeMsg` (callable by anyone) is **not** a threshold bypass: `_isMessageExecuted`
+  (ManagerBase:170) reverts `MessageNotApproved` unless `isMessageApproved(digest)`, then `_replayProtect`
+  marks executed **before** any mint.
+- `TrimmedAmount.trim`/`untrim` is value-preserving (worked both `destDec≤8` and `>8`): minted =
+  `T·10^(destDec−d)` = the source-locked value at trimmed precision; `SafeCast.toUint64` reverts on overflow;
+  the outbound dust-check (`_trimTransferAmount`) forbids locking un-mintable dust. No over-mint.
+- `completeInboundQueuedTransfer` is `nonReentrant` and **deletes the queue entry before minting**; the
+  message is already marked `executed` before enqueue → no double-mint.
+
+**(b) UTXO/XRPL manager emitters — NOT DEPLOYED ON MAINNET (scope finding).**
+`sdk/mainnet_consts.go`: `KnownManagerEmitters` and `KnownXRPLSequencer` are **empty**; the emitters exist
+only in `sdk/devnet_consts.go` (Solana/Ethereum devnet addresses). The Dogecoin/XRPL manager feature is
+pre-production. **Consequence:** the entire Manager Service (including the L1 aggregation finding above) and its
+emitters are not yet protecting mainnet TVL — so L1 is a pre-production liveness bug, not a live-funds Critical,
+which materially limits its current bounty eligibility. The emitter contracts themselves are not present in the
+`wormhole` or `native-token-transfers` repos.
+
 ## Dynamic verification (executable harness)
 
 Static review was corroborated with a property-test harness that drives the **real** node code to try to
