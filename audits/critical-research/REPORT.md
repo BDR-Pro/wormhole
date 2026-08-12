@@ -283,6 +283,18 @@ emitter/manager contracts, not the node. Pursued both:
 - `completeInboundQueuedTransfer` is `nonReentrant` and **deletes the queue entry before minting**; the
   message is already marked `executed` before enqueue → no double-mint.
 
+**(a2) NTT — Solana program (`example-native-token-transfers`) inbound path: SOUND.**
+- `redeem`: the `transceiver_message` must be `owner`ed by the registered transceiver program; `peer` PDA binds
+  the source manager; target chain + recipient-manager checked; the **InboxItem is content-addressed** (PDA
+  seeded by `keccak256(ntt_manager_payload, from_chain)`), so amount/payload are bound and disagreeing votes
+  can't interfere; votes are an idempotent per-transceiver **bitmap** AND-ed with `enabled_transceivers` and
+  gated on `>= threshold`.
+- `release_inbound`: replay is a one-way state machine `NotApproved → ReleaseAfter → Released`
+  (`inbox.rs::try_release` sets `Released` **before** the mint CPI; any later release returns
+  `TransferAlreadyRedeemed`). Mint authority is the program's `token_authority` **PDA** (or a `m==1` multisig
+  containing it); amount = `inbox_item.amount` from the content-addressed item. No double-mint, no threshold
+  bypass, no over-mint.
+
 **(b) UTXO/XRPL manager emitters — NOT DEPLOYED ON MAINNET (scope finding).**
 `sdk/mainnet_consts.go`: `KnownManagerEmitters` and `KnownXRPLSequencer` are **empty**; the emitters exist
 only in `sdk/devnet_consts.go` (Solana/Ethereum devnet addresses). The Dogecoin/XRPL manager feature is
