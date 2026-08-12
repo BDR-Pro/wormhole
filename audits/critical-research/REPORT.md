@@ -96,6 +96,22 @@ accounting flaw defeating **I5/I6**. None was found.
 - `upgrade_guardian_set` is `+1`-monotonic vs both old-set and bridge index, replay-guarded, creates a fresh
   account (no overwrite). **(I8)**
 
+### 4b. Solana core — new `close_posted_message` / `close_signature_set_and_posted_vaa` (rent reclaim)
+Account-close/revival is a classic Solana double-spend vector, so these fresh instructions got a dedicated
+line-by-line pass. **Replay protection is not broken:**
+- The token bridge's replay guard is the **`Claim`** account (`claim::consume`), and **neither close
+  instruction ever touches a `Claim`** — they only close `msg`/`msu` message accounts, `vaa`-prefixed
+  `PostedVAA`, and `SignatureSet`. Closing + re-posting a VAA still hits the persistent `Claim` on the second
+  `complete_transfer` → no double-redeem.
+- Closes are gated by a **30-day `RETENTION_PERIOD`** on mainnet (`close_posted_message` line 98,
+  `close_signature_set` line 162) — a message can't be closed before guardians observe it (they observe in
+  seconds), so no censorship. An unredeemed VAA closed after 30 days is permissionlessly re-postable from its
+  bytes → no permanent loss.
+- Anti-cosplay: program-owner check, exact `try_from_slice` parse (no discriminator, so no leftover/missing
+  bytes), prefix checks, PDA-derivation match, `vaa_signature_account` pinning to the specific signature set,
+  and (for an uninitialised `PostedVAA`) a **guardian-set-expired** requirement. Reclaimed lamports use
+  `checked_add` into the fee collector.
+
 ### 5. Solana Token Bridge — pause feature + transfers/complete/create-wrapped
 - `require_not_paused` is present on **all 10** fund/attest paths (`transfer_native/wrapped`,
   `..._with_payload`, `complete_native/wrapped`, `..._with_payload`, `attest`, `create_wrapped`); governance
