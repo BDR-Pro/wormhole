@@ -295,6 +295,19 @@ emitter/manager contracts, not the node. Pursued both:
   containing it); amount = `inbox_item.amount` from the content-addressed item. No double-mint, no threshold
   bypass, no over-mint.
 
+**(a3) NTT — Sui move package (`sui/packages/ntt`) inbound path: SOUND (sharpest lead, refuted).**
+`release_impl` takes the recipient/amount from a caller-supplied `message` and looks the inbox item up by it —
+a real payout-substitution lead. **Refuted:** `InboxKey` embeds the *entire* `NttManagerMessage` (chain_id +
+id + sender + the NativeTokenTransfer payload incl. amount+recipient), and Sui keys structurally, so a
+same-id message with a different recipient/amount hashes to a different key → `NotApproved`/not-found → abort
+(`inbox.move:40-53`). Votes are a bitmap AND-ed with enabled transceivers vs `get_threshold()`; `try_release`
+is the same one-way `NotApproved→ReleaseAfter→Released` machine (`Released` aborts `ETransferAlreadyRedeemed`)
+that flips before `mint_or_unlock` (treasury-cap mint / balance take). No substitution, double-mint, or bypass.
+
+**NTT verdict (all three chains):** the live NTT inbound mint path is sound on EVM, Solana, and Sui — identical
+invariants (per-transceiver bitmap threshold, content-addressed replay-once item, value-preserving untrim,
+PDA/treasury-cap mint authority).
+
 **(b) UTXO/XRPL manager emitters — NOT DEPLOYED ON MAINNET (scope finding).**
 `sdk/mainnet_consts.go`: `KnownManagerEmitters` and `KnownXRPLSequencer` are **empty**; the emitters exist
 only in `sdk/devnet_consts.go` (Solana/Ethereum devnet addresses). The Dogecoin/XRPL manager feature is
