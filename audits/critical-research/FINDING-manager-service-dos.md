@@ -9,13 +9,18 @@ The guardian node's **Manager Service** collects the M-of-N partial signatures t
 ---
 
 ## Severity
-**High (temporary/persistent freezing of a bridge function's liveness).**
+**Low**, per Wormhole's published Immunefi severity classification.
 
-Honest caveats a triager will weigh (disclosed in good faith):
-- **Requires a guardian.** The p2p layer (`processSignedManagerTransaction`) only accepts `ManagerTransaction` gossip signed by a guardian key, so the attacker must control a guardian — a privileged, semi-trusted role — and is cryptographically identifiable (removable via governance). This typically caps the rating at High/Medium rather than Critical.
-- **No theft.** Funds are never moved to an attacker; the on-chain M-of-N multisig rejects the invalid transaction. Impact is liveness, not loss.
-- **Recoverable.** A client fix plus clearing the poisoned DB entries restores service.
-- **Deployment status.** At the time of review `KnownManagerEmitters` / `KnownXRPLSequencer` are **empty on mainnet** (`sdk/mainnet_consts.go`); the feature is configured only on devnet. If it is not yet protecting mainnet TVL, program scope may treat this as pre-production. Verify current deployment before submitting.
+This maps to two Low-tier rows of Wormhole's table (whichever the team applies):
+- *"Bugs that are not currently exploitable but may become exploitable in future stages of development… a configuration setting change… The WH team determines feasibility."* — the UTXO/XRPL manager feature is not deployed on mainnet (`KnownManagerEmitters` / `KnownXRPLSequencer` are empty in `sdk/mainnet_consts.go`); arming it is a config/deployment change.
+- *"Denial of Service attacks against the Guardian network (excluding volumetric attacks) that would result in an extended (24 hours) degradation of performance."* — the poisoning is persistent.
+
+Three independent factors each cap the rating and together land it at Low:
+- **It is a DoS, not theft.** No funds move; the destination-chain M-of-N multisig rejects the invalid transaction. Wormhole reserves Critical/High for loss/theft/forging/unbacked-mint, and several higher tiers explicitly *exclude* denial of service.
+- **It requires a malicious guardian.** The p2p layer (`processSignedManagerTransaction`) only accepts `ManagerTransaction` gossip signed by a guardian key, so the attacker must control a guardian (a semi-trusted role) and is cryptographically identifiable/removable. Note the table rates even *"attacks that would be **critical** if a single guardian were malicious"* as only Medium — and this attack would be a *DoS*, not critical, if a guardian were malicious, so it sits below that.
+- **It is pre-production.** Empty mainnet emitters place it in the Low "future-exploitability" bucket regardless of the above.
+
+There is no honest reading of Wormhole's table that rates this above Low. (An earlier draft of this report labeled it "High" on a generic severity intuition; that was incorrect against Wormhole's actual program rubric and has been corrected here.)
 
 ---
 

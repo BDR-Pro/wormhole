@@ -173,7 +173,7 @@ signature (`ManagerTransaction`); once M-of-N are aggregated the multisig tx is 
    P2SH hash, so a crafted set/index/prefix just yields a script that doesn't match the funds' P2SH → invalid tx.
    No theft without guardian quorum **and** M manager keys.
 
-**Real weakness found (High/DoS, not Critical, developer-acknowledged):** `handleIncomingTransaction`
+**Real weakness found (Low, per Wormhole's Immunefi table — developer-acknowledged):** `handleIncomingTransaction`
 aggregates partial signatures **without verifying them** and validates `SignerIndex < N` **without binding the
 envelope guardian to the claimed `SignerIndex`**. `storeSignature` is first-write-wins per index. So a **single
 malicious guardian** (p2p envelope must still be a guardian — non-guardians are rejected by
@@ -181,8 +181,11 @@ malicious guardian** (p2p envelope must still be a guardian — non-guardians ar
 ahead of honest signatures, permanently poisoning the aggregation network-wide → the assembled multisig tx is
 rejected on-chain → **releases are blocked (liveness DoS)**. This is exactly the weakness the code documents in a
 standing SECURITY comment (points 1–3) with a planned mitigation. It does **not** move or lose funds (on-chain
-multisig rejects the invalid tx), requires a privileged insider, and is recoverable by the documented fix — so
-it is **High at most, not Critical**.
+multisig rejects the invalid tx), requires a privileged insider, and is recoverable by the documented fix.
+Against Wormhole's published severity table this maps to **Low** — it fits the "extended (24h) DoS of the guardian
+network" and "not currently exploitable / future-exploitability (pre-production)" rows, both classified Low; DoS,
+insider-requirement, and pre-production status each independently keep it out of the Medium+ tiers. (An earlier
+draft said "High"; corrected to match Wormhole's actual rubric.)
 
 ### 9. Guardian node — watchers, processor, delegated-guardian consensus
 - **Aptos watcher (rewritten):** `verifyEventType` binds every event to the configured core-bridge account
@@ -207,7 +210,7 @@ Recording where every chain terminates, because "why it can't escalate" is the d
 
 | # | Lead (bug/edge) | Chain attempted | Terminates because |
 |---|-----------------|-----------------|--------------------|
-| L1 | Manager Service aggregates partial sigs unverified; `SignerIndex` not bound to envelope guardian; first-write-wins | poison aggregation → make external assembler build a tx paying attacker | Manager only *collects* sigs; assembly+broadcast is **external**; poisoned sigs → invalid tx rejected on-chain. Chains to **DoS only** (the real High finding). |
+| L1 | Manager Service aggregates partial sigs unverified; `SignerIndex` not bound to envelope guardian; first-write-wins | poison aggregation → make external assembler build a tx paying attacker | Manager only *collects* sigs; assembly+broadcast is **external**; poisoned sigs → invalid tx rejected on-chain. Chains to **DoS only** (the real finding; Low per Wormhole's table). |
 | L2 | Accountant `modify_balance` can *directly set* balances (bypasses `checked_sub` bound) | inflate a chain balance → mint unbacked up to it | No direct `ExecuteMsg::ModifyBalance`; reachable only via `handle_accountant_governance_vaa` ← `SubmitVaas` ← `VerifyVaa` (guardian quorum) + Solana governance emitter. `info` is an event attribute, not auth. |
 | L3 | NTT accountant is newer; maybe weaker sig/quorum than main accountant | double-count one guardian to reach quorum | Byte-identical hardening: `u128` bitmap `add_signature` (idempotent), `count_ones` quorum, `VerifyMessageSignature` binds `sig.index→addresses[index]`, digest replay via `DIGESTS`. |
 | L4 | NTT accountant self-flags "amounts NOT normalized across chains" (decimal mismatch) | lock small at low-decimals, mint large at high-decimals → unbacked mint | `normalize_transfer_amount` scales every amount to `TRIMMED_DECIMALS=8`; per-transfer double-entry uses the same normalized amount; `checked_add/sub` is **fail-safe** (underflow rejects, never over-mints); `decimals` is guardian-attested. At worst a same-token liveness edge, not a drain. |
@@ -220,7 +223,7 @@ Every chain terminates at one of: **guardian/delegate quorum** (the stated trust
 
 These are **not** vulnerabilities at Critical tier; recorded for completeness.
 
-0. **Manager Service aggregation & DB poisoning (High / liveness — the most significant real finding).**
+0. **Manager Service aggregation & DB poisoning (Low per Wormhole's table / liveness — the most significant real finding).**
    `handleIncomingTransaction` accepts a gossiped `ManagerTransaction` from any guardian and stores it with
    **no validation of the signatures, and no validation that `VaaHash`/`VaaId` correspond to a real VAA**, and
    without binding the envelope guardian to the claimed `SignerIndex`. Chained, a single malicious guardian can:
@@ -238,7 +241,7 @@ These are **not** vulnerabilities at Critical tier; recorded for completeness.
    DB is namespace-isolated (`MANAGER:` prefix) from signed VAAs (`signed/`), governor (`GOV:`), and notary
    (`NOTARY:`), so the poisoning cannot corrupt consensus/replay state. Every failure mode is therefore
    **liveness (DoS)**, never theft — and it requires a guardian (insider, cryptographically attributable via the
-   p2p envelope signature) and is recoverable by a client fix. High, not Critical.
+   p2p envelope signature) and is recoverable by a client fix. Low per Wormhole's table (DoS + insider + pre-production), not Critical.
 
    Fix: verify each partial signature against the computed sighash for the claimed signer's pubkey before
    storing; reject a `SignerIndex` that does not match the envelope guardian's own manager slot; and validate
