@@ -220,6 +220,23 @@ These are **not** vulnerabilities at Critical tier; recorded for completeness.
 
 ---
 
+## Dynamic verification (executable harness)
+
+Static review was corroborated with a property-test harness that drives the **real** node code to try to
+*falsify* the two invariants whose failure would be Critical (see `HARNESS.md`; tests live at
+`node/pkg/manager/dogecoin/audit_payout_binding_test.go` and
+`node/pkg/processor/audit_delegate_quorum_test.go`).
+
+- **Manager Service payout binding** — ~25,000 adversarial payout mutations (retarget recipient, inflate
+  amount, add/reorder outputs, retarget input UTXO) across 5,000 randomized Dogecoin releases; every mutation
+  changed the SigHashAll sighash a guardian signs. A separate check confirms releases to different recipients
+  share **no** input sighash. ⇒ a collected partial signature provably cannot be replayed to a different payout.
+- **Delegated-guardian quorum floor** — exhaustive fuzz of `(numKeys, threshold)` proves
+  `NewDelegatedGuardianChainConfig` accepts a threshold **iff** `CalculateQuorum(n) ≤ threshold ≤ n`, duplicate
+  keys are rejected, and the node's quorum equals the on-chain `(2n/3)+1` for n=1..255.
+
+**All tests pass** — neither Critical invariant could be falsified against the real code.
+
 ## Residual risk — where to point dynamic testing
 
 Static review cleared the code paths above. The highest-value places to invest **dynamic** effort
