@@ -136,15 +136,26 @@ that custodies real Dogecoin (P2SH) and XRPL funds**. A guardian-signed VAA from
 authorizes a release; each guardian signs the derived destination-chain transaction and gossips its partial
 signature (`ManagerTransaction`); once M-of-N are aggregated the multisig tx is assembled and broadcast.
 
-**Theft path is closed (two independent gates):**
-- The destination-chain tx content (recipient, amount, inputs, redeem script) is derived from a
-  **guardian-signed VAA** from a `validateEmitter`-checked emitter; guardians only ever sign VAA-derived
-  transactions. Redirecting funds needs a malicious VAA = guardian quorum.
-- Funds only move if the **Dogecoin/XRPL network itself verifies M valid signatures** against the P2SH/multisig
-  the funds already sit in. The manager set (keys, M, N) is read from the governance-controlled on-chain
-  `DelegatedManagerSet` contract (immutable per index, safely cached) — it cannot be spoofed. Redeem scripts are
-  bound to `payload.DelegatedManagerSetIndex` + the original lock recipient, so a crafted set/index just yields a
-  script that doesn't match the funds' P2SH → invalid tx. No theft without guardian quorum **and** M manager keys.
+**Theft path is closed — verified line-by-line end-to-end (four independent links):**
+1. **VAA-into-manager is quorum-verified.** The manager's `vaaC` is written only by the processor's
+   `storeSignedVAA`, reached either from the local post-quorum assembly path or from
+   `handleInboundSignedVAAWithQuorum`, which calls `v.Verify(p.gs.Keys)` **before** storing
+   (observation.go:578). `VAA.Verify` enforces `len(sigs) >= CalculateQuorum(len(keys))` **and**
+   `VerifySignatures` (distinct/ascending indices, ecrecover match) — so a network-supplied VAA that has not
+   met full quorum against the *current* guardian set never reaches the manager.
+2. **Manager signs only VAA-derived txs from whitelisted emitters.** `handleVAA` gates on `validateEmitter`
+   (XRPL sequencer / known UTXO manager emitters) and dispatches by payload prefix; every signer builds the tx
+   from the VAA payload. Redirecting funds needs a malicious VAA = guardian quorum.
+3. **The signature is cryptographically bound to the exact payout.** Dogecoin uses
+   `txscript.CalcSignatureHash(redeemScript, SigHashAll, tx, i)` (transaction.go:98) — commits to all inputs, all
+   outputs, and the input's redeem script; XRPL uses `EncodeForMultisigning` (`SMT\0` prefix + signer account)
+   over a `Payment` whose `Destination`/`Amount` come straight from the VAA payload. A partial signature cannot be
+   replayed to a different recipient/amount.
+4. **Funds only move via on-chain M-of-N verification against the funds' own script/account.** The manager set
+   (keys, M, N) is read from the governance-controlled on-chain `DelegatedManagerSet` (immutable per index,
+   safely cached) — unspoofable. Dogecoin redeem scripts bind `emitter_chain|emitter_contract|recipient` into the
+   P2SH hash, so a crafted set/index/prefix just yields a script that doesn't match the funds' P2SH → invalid tx.
+   No theft without guardian quorum **and** M manager keys.
 
 **Real weakness found (High/DoS, not Critical, developer-acknowledged):** `handleIncomingTransaction`
 aggregates partial signatures **without verifying them** and validates `SignerIndex < N` **without binding the
