@@ -60,12 +60,31 @@ Escalation ceiling (verified): the manager service is only a *signature collecto
 
 ---
 
-## Proof of concept (requirements)
-A Go integration test against `ManagerService` with an in-memory `ManagerDB` and a stubbed `ManagerSetReader` (avoiding the Ethereum RPC dependency):
-1. Configure an M-of-N manager set for a destination chain.
-2. Drive `handleIncomingTransaction` from a single guardian identity with garbage `Signatures` across all `SignerIndex` values for one `VaaHash`.
-3. Assert the aggregated transaction reaches `Required` signatures composed entirely of attacker garbage, and that a subsequent honest `storeSignature` for a poisoned index is dropped.
-4. Assert `GetPendingTransactionByID(legitVaaId)` can be redirected by submitting `legitVaaId` with a bogus `VaaHash`.
+## Proof of concept (included, passing)
+A runnable Go PoC lives at `node/pkg/manager/poc_manager_dos_test.go`. It drives the **real**
+`ManagerService.storeSignature` path with an in-memory `ManagerDB` and a pre-populated
+`ManagerSetReader` cache (no Ethereum RPC needed), against a 2-of-3 Dogecoin manager set:
+
+- `TestPoC_SignerIndexSpoofingCompletesAggregationWithGarbage` — one attacker identity fills all three
+  signer slots with junk; the aggregation reports `IsComplete()` with zero valid signatures; a later
+  honest signature for a poisoned slot is dropped (first-write-wins).
+- `TestPoC_IndexPoisoningRedirectsByVaaID` — submitting a legitimate `VaaId` with a bogus `VaaHash`
+  redirects `GetPendingTransactionByID(victimVaaId)` to the attacker's entry.
+- `TestPoC_UnvalidatedVaaHashCreatesEntries` — 500 arbitrary `VaaHash` values create 500 DB entries
+  (unbounded-growth primitive).
+
+Run:
+```
+cd node && go test ./pkg/manager/ -run 'TestPoC_' -v
+```
+Result: all three pass.
+```
+--- PASS: TestPoC_SignerIndexSpoofingCompletesAggregationWithGarbage
+--- PASS: TestPoC_IndexPoisoningRedirectsByVaaID
+--- PASS: TestPoC_UnvalidatedVaaHashCreatesEntries
+```
+(The unrelated `TestGetManagerSet_Dogecoin_Index1` in the same package is a pre-existing live-RPC
+integration test and fails only because the sandbox blocks the Sepolia endpoint.)
 
 ---
 
