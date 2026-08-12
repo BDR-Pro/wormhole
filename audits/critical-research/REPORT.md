@@ -220,15 +220,29 @@ Every chain terminates at one of: **guardian/delegate quorum** (the stated trust
 
 These are **not** vulnerabilities at Critical tier; recorded for completeness.
 
-0. **Manager Service signature-aggregation poisoning (High / liveness — the most significant real finding).**
-   A single malicious guardian can permanently block Dogecoin/XRPL releases by front-running signature
-   aggregation with garbage partial-signatures under every `SignerIndex` (`handleIncomingTransaction` does not
-   bind the envelope guardian to `SignerIndex`; `storeSignature` is first-write-wins). Impact is DoS only — funds
-   are never moved (on-chain multisig rejects the invalid tx) — requires a guardian (insider), and is recoverable.
-   Already documented by the developers in a standing SECURITY comment with a planned mitigation (verify partial
-   sigs before storing; store unverified sigs as `PendingSignatures` until the sighashes are known). Fix:
-   verify each partial signature against the computed sighash for the claimed signer's pubkey before storing, and
-   reject a `SignerIndex` that does not match the envelope guardian's own manager slot.
+0. **Manager Service aggregation & DB poisoning (High / liveness — the most significant real finding).**
+   `handleIncomingTransaction` accepts a gossiped `ManagerTransaction` from any guardian and stores it with
+   **no validation of the signatures, and no validation that `VaaHash`/`VaaId` correspond to a real VAA**, and
+   without binding the envelope guardian to the claimed `SignerIndex`. Chained, a single malicious guardian can:
+   - **Signature-slot poisoning** — front-run honest signatures with garbage under every `SignerIndex`
+     (`storeSignature` is first-write-wins) so the externally-assembled multisig tx is invalid → releases blocked.
+   - **Index poisoning** — `VaaId` is attacker-controlled and becomes the DB key `MANAGER:IDX:V1:<VaaId>`;
+     submitting a real `VaaId` with a bogus `VaaHash` overwrites the legitimate `VaaId→hash` index so
+     `GetPendingTransactionByID` returns attacker garbage.
+   - **Storage growth** — arbitrary `VaaHash` values create unbounded `MANAGER:SIG:V1:*` entries.
+
+   **Escalation ceiling — structural, cannot reach Critical:** the manager service is only a *signature
+   collector*; its output is consumed solely by the on-chain Dogecoin/XRPL **M-of-N multisig, which verifies
+   every signature against the funds' own script**. No corruption of the collector can produce a *valid*
+   signature authorizing a different payout (empirically confirmed by the payout-binding harness). The manager
+   DB is namespace-isolated (`MANAGER:` prefix) from signed VAAs (`signed/`), governor (`GOV:`), and notary
+   (`NOTARY:`), so the poisoning cannot corrupt consensus/replay state. Every failure mode is therefore
+   **liveness (DoS)**, never theft — and it requires a guardian (insider, cryptographically attributable via the
+   p2p envelope signature) and is recoverable by a client fix. High, not Critical.
+
+   Fix: verify each partial signature against the computed sighash for the claimed signer's pubkey before
+   storing; reject a `SignerIndex` that does not match the envelope guardian's own manager slot; and validate
+   `VaaHash`/`VaaId` against a locally-known signed VAA before creating a DB entry.
 
 1. **`Implementation.submitTransferFees` fork-replay (Info).** The `chain == 0` branch does not also require
    `!isFork()` (unlike `submitContractUpgrade`/`submitSetMessageFee`). A legitimately guardian-signed
