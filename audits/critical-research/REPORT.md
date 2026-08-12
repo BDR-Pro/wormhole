@@ -130,7 +130,34 @@ accounting flaw defeating **I5/I6**. None was found.
   unbacked mint cannot drive a balance negative. Registered-emitter + digest binding + duplicate-digest
   protection round it out. **(I1..I6)**
 
-### 8. Guardian node — watchers, processor, delegated-guardian consensus
+### 8. Guardian node — Manager Service (Dogecoin / XRPL multisig custody) — *freshest, highest-value surface*
+The Manager Service is a new subsystem where guardians hold secp256k1 keys forming the **M-of-N multisig
+that custodies real Dogecoin (P2SH) and XRPL funds**. A guardian-signed VAA from a known manager emitter
+authorizes a release; each guardian signs the derived destination-chain transaction and gossips its partial
+signature (`ManagerTransaction`); once M-of-N are aggregated the multisig tx is assembled and broadcast.
+
+**Theft path is closed (two independent gates):**
+- The destination-chain tx content (recipient, amount, inputs, redeem script) is derived from a
+  **guardian-signed VAA** from a `validateEmitter`-checked emitter; guardians only ever sign VAA-derived
+  transactions. Redirecting funds needs a malicious VAA = guardian quorum.
+- Funds only move if the **Dogecoin/XRPL network itself verifies M valid signatures** against the P2SH/multisig
+  the funds already sit in. The manager set (keys, M, N) is read from the governance-controlled on-chain
+  `DelegatedManagerSet` contract (immutable per index, safely cached) — it cannot be spoofed. Redeem scripts are
+  bound to `payload.DelegatedManagerSetIndex` + the original lock recipient, so a crafted set/index just yields a
+  script that doesn't match the funds' P2SH → invalid tx. No theft without guardian quorum **and** M manager keys.
+
+**Real weakness found (High/DoS, not Critical, developer-acknowledged):** `handleIncomingTransaction`
+aggregates partial signatures **without verifying them** and validates `SignerIndex < N` **without binding the
+envelope guardian to the claimed `SignerIndex`**. `storeSignature` is first-write-wins per index. So a **single
+malicious guardian** (p2p envelope must still be a guardian — non-guardians are rejected by
+`processSignedManagerTransaction`) can broadcast garbage partial-signatures under *every* signer index, racing
+ahead of honest signatures, permanently poisoning the aggregation network-wide → the assembled multisig tx is
+rejected on-chain → **releases are blocked (liveness DoS)**. This is exactly the weakness the code documents in a
+standing SECURITY comment (points 1–3) with a planned mitigation. It does **not** move or lose funds (on-chain
+multisig rejects the invalid tx), requires a privileged insider, and is recoverable by the documented fix — so
+it is **High at most, not Critical**.
+
+### 9. Guardian node — watchers, processor, delegated-guardian consensus
 - **Aptos watcher (rewritten):** `verifyEventType` binds every event to the configured core-bridge account
   + handle (type-tag address bytes + `guid.account_address`); reobservation re-fetches from the trusted RPC
   rather than trusting attacker-supplied data. Trust boundary is the guardian's own RPC (standard model).
@@ -149,6 +176,16 @@ accounting flaw defeating **I5/I6**. None was found.
 ## Non-critical observations (informational / design notes)
 
 These are **not** vulnerabilities at Critical tier; recorded for completeness.
+
+0. **Manager Service signature-aggregation poisoning (High / liveness — the most significant real finding).**
+   A single malicious guardian can permanently block Dogecoin/XRPL releases by front-running signature
+   aggregation with garbage partial-signatures under every `SignerIndex` (`handleIncomingTransaction` does not
+   bind the envelope guardian to `SignerIndex`; `storeSignature` is first-write-wins). Impact is DoS only — funds
+   are never moved (on-chain multisig rejects the invalid tx) — requires a guardian (insider), and is recoverable.
+   Already documented by the developers in a standing SECURITY comment with a planned mitigation (verify partial
+   sigs before storing; store unverified sigs as `PendingSignatures` until the sighashes are known). Fix:
+   verify each partial signature against the computed sighash for the claimed signer's pubkey before storing, and
+   reject a `SignerIndex` that does not match the envelope guardian's own manager slot.
 
 1. **`Implementation.submitTransferFees` fork-replay (Info).** The `chain == 0` branch does not also require
    `!isFork()` (unlike `submitContractUpgrade`/`submitSetMessageFee`). A legitimately guardian-signed
@@ -178,6 +215,10 @@ Static review cleared the code paths above. The highest-value places to invest *
 (fuzzing / property tests / economic simulation / multi-node consensus tests) — i.e. where a real Critical, if
 any exists, is most likely to live:
 
+- **Manager Service (Dogecoin/XRPL)** — the newest custody mechanism and the least-audited. Beyond the
+  documented aggregation DoS, fuzz the redeem-script/sighash construction and the manager-set-index selection at
+  set-rotation boundaries; property: a signed destination tx can only ever spend the exact UTXOs/accounts the
+  guardian-signed VAA authorized, to the VAA-specified recipient.
 - **Delegated-guardian set operations under churn** — set rotation/removal races, the compact
   `SignedDelegateSignaturesBroadcast` expansion path, and delegate/canonical quorum accounting during
   simultaneous canonical + delegated set updates. (Property test: no message ever obtains a canonical VAA
@@ -193,8 +234,10 @@ any exists, is most likely to live:
 
 ## Methodology note
 
-18 security-critical components were hand-traced; an 8-surface finder/adversarial-refuter workflow ran in
-parallel. On the surfaces completed at time of writing (EVM core, EVM token bridge, EVM peripherals, Solana
-core, Solana token bridge) the automated adversarial pass independently returned **zero** findings at any
-severity — consistent with the hand analysis. The consistent negative result across independent methods is the
-basis for the verdict.
+19 security-critical components were hand-traced, plus a dedicated deep-dive on the Manager Service (Dogecoin/
+XRPL multisig custody) that the automated pass did not cover as a standalone surface. An 8-surface
+finder/adversarial-refuter workflow ran in parallel and **completed all 8 surfaces** (EVM core, EVM token
+bridge, EVM peripherals, Solana core, Solana token bridge, Aptos/Sui Move, Global Accountant + Governor,
+guardian watchers/processor) returning **zero findings at any severity**, independently corroborating the hand
+analysis. The consistent negative result across two independent methods — plus the manual Manager Service
+review whose only real finding is a non-critical, developer-acknowledged DoS — is the basis for the verdict.
