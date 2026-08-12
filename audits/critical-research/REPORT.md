@@ -304,6 +304,13 @@ same-id message with a different recipient/amount hashes to a different key → 
 is the same one-way `NotApproved→ReleaseAfter→Released` machine (`Released` aborts `ETransferAlreadyRedeemed`)
 that flips before `mint_or_unlock` (treasury-cap mint / balance take). No substitution, double-mint, or bypass.
 
+**(b) NTT outbound path + rate limiter (EVM): SOUND.** `_transferEntryPoint` corrects fee-on-transfer via
+balance-delta, and in BURNING mode requires `balanceBefore == balanceAfterBurn` after `burn(amount)` (proving
+exactly `amount` was burned); `_trimTransferAmount` reverts `TransferAmountHasDust` unless
+`amount == untrim(trim(amount))`. So burned/locked == trimmed-amount-sent == amount minted on the destination —
+no over-mint. The outbound rate limiter is a rate cap applied *after* the burn/lock, so bypassing it mints
+nothing; the inbound "backflow" refill only reflects real attested inbound volume.
+
 **NTT verdict (all three chains):** the live NTT inbound mint path is sound on EVM, Solana, and Sui — identical
 invariants (per-transceiver bitmap threshold, content-addressed replay-once item, value-preserving untrim,
 PDA/treasury-cap mint authority).
