@@ -200,6 +200,22 @@ it is **High at most, not Critical**.
 
 ---
 
+## Chain-attack lead log (deep, one-by-one)
+
+Each promising lead was pursued individually and chained toward theft/unbacked-mint until it hit a wall.
+Recording where every chain terminates, because "why it can't escalate" is the deliverable.
+
+| # | Lead (bug/edge) | Chain attempted | Terminates because |
+|---|-----------------|-----------------|--------------------|
+| L1 | Manager Service aggregates partial sigs unverified; `SignerIndex` not bound to envelope guardian; first-write-wins | poison aggregation → make external assembler build a tx paying attacker | Manager only *collects* sigs; assembly+broadcast is **external**; poisoned sigs → invalid tx rejected on-chain. Chains to **DoS only** (the real High finding). |
+| L2 | Accountant `modify_balance` can *directly set* balances (bypasses `checked_sub` bound) | inflate a chain balance → mint unbacked up to it | No direct `ExecuteMsg::ModifyBalance`; reachable only via `handle_accountant_governance_vaa` ← `SubmitVaas` ← `VerifyVaa` (guardian quorum) + Solana governance emitter. `info` is an event attribute, not auth. |
+| L3 | NTT accountant is newer; maybe weaker sig/quorum than main accountant | double-count one guardian to reach quorum | Byte-identical hardening: `u128` bitmap `add_signature` (idempotent), `count_ones` quorum, `VerifyMessageSignature` binds `sig.index→addresses[index]`, digest replay via `DIGESTS`. |
+| L4 | NTT accountant self-flags "amounts NOT normalized across chains" (decimal mismatch) | lock small at low-decimals, mint large at high-decimals → unbacked mint | `normalize_transfer_amount` scales every amount to `TRIMMED_DECIMALS=8`; per-transfer double-entry uses the same normalized amount; `checked_add/sub` is **fail-safe** (underflow rejects, never over-mints); `decimals` is guardian-attested. At worst a same-token liveness edge, not a drain. |
+| L5 | Solana `close_posted_message` / `close_signature_set_and_posted_vaa` (account-close = classic double-spend) | close a replay-guard account → re-post → redeem twice | Neither closes a **`Claim`** (the token bridge's replay guard); 30-day retention; anti-cosplay checks; sig-account pinning; guardian-set-expiry gate. |
+| L6 | Delegate consensus: canonical guardians sign without a watcher | sub-delegate-quorum minority forges a delegated chain's message | `threshold ≥ CalculateQuorum(n)` (fuzz-proven), distinct-key counting, `CreateDigest()` bucketing, governance chains non-delegable. Requires delegate-set super-majority = trust assumption. |
+
+Every chain terminates at one of: **guardian/delegate quorum** (the stated trust assumption), **checked-math fail-safe**, or **liveness/DoS**. None reaches attacker-controlled theft or unbacked mint.
+
 ## Non-critical observations (informational / design notes)
 
 These are **not** vulnerabilities at Critical tier; recorded for completeness.
